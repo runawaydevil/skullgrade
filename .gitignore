@@ -1,6 +1,7 @@
-# Executáveis compilados
+# Executáveis compilados (mas manter na pasta release/)
 *.exe
 *.dll
+!release/**/*.exe
 
 # Arquivos temporários do PowerShell
 *.tmp
@@ -53,6 +54,10 @@ config.local.json
 # Arquivos de cache
 .cache/
 *.cache
+
+# Arquivos de release (manter estrutura, mas ignorar ZIPs temporários)
+release/*.zip
+release/v*/VERSION_INFO.txt
 
 # Arquivos temporários do Windows
 *.tmp
