@@ -1,0 +1,63 @@
+# Executáveis compilados
+*.exe
+*.dll
+
+# Arquivos temporários do PowerShell
+*.tmp
+*.log
+*.cache
+
+# Arquivos de backup
+*.bak
+*~
+*.swp
+*.swo
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Arquivos do Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Arquivos do PowerShell
+*.ps1xml
+*.psm1
+
+# Arquivos de módulos instalados localmente
+Modules/
+
+# Arquivos de teste
+Test-*.ps1
+*.test.ps1
+
+# Arquivos de documentação gerados
+docs/
+*.html
+
+# Arquivos de build
+build/
+dist/
+out/
+
+# Arquivos de log
+logs/
+*.log
+
+# Arquivos de configuração local
+*.local
+config.local.json
+
+# Arquivos de cache
+.cache/
+*.cache
+
+# Arquivos temporários do Windows
+*.tmp
+*.temp
+
+# Arquivos de erro
+*.err
+*.error
