@@ -1,7 +1,7 @@
-# Executáveis compilados (mas manter na pasta release/)
+# Executáveis compilados
 *.exe
 *.dll
-!release/**/*.exe
+*.sha256
 
 # Arquivos temporários do PowerShell
 *.tmp
