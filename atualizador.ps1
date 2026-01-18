@@ -17,11 +17,59 @@ $script:Year = "2026"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# Detectar se está rodando como EXE compilado
+function Test-IsCompiledExe {
+    try {
+        # Quando compilado, $PSCommandPath aponta para o .exe, não para .ps1
+        $isExe = $PSCommandPath -like "*.exe" -or 
+                 (Get-Command $PSCommandPath -ErrorAction SilentlyContinue) -eq $null
+        return $isExe
+    }
+    catch {
+        return $false
+    }
+}
+
+$script:IsCompiledExe = Test-IsCompiledExe
+
+# Obter caminho do PowerShell
+function Get-PowerShellPath {
+    if ($script:IsCompiledExe) {
+        # Quando compilado, tentar encontrar pwsh.exe no PATH
+        $pwshPath = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+        if ($pwshPath) {
+            return $pwshPath.Source
+        }
+        # Fallback para powershell.exe
+        $psPath = Get-Command powershell.exe -ErrorAction SilentlyContinue
+        if ($psPath) {
+            return $psPath.Source
+        }
+        return "pwsh.exe"
+    }
+    else {
+        # Quando rodando como script, usar o executável atual
+        return "pwsh.exe"
+    }
+}
+
 function Ensure-Admin {
     $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
     ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
     if (-not $isAdmin) {
+        # Se compilado como EXE com -requireAdmin, não tentar relançar
+        if ($script:IsCompiledExe) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Este aplicativo requer privilégios de administrador.`nPor favor, execute como Administrador.",
+                "Elevação de Privilégios",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
+            exit 1
+        }
+        
+        # Quando rodando como script, tentar elevar
         [System.Windows.Forms.MessageBox]::Show(
             "Este aplicativo requer privilégios de administrador.`nReabrindo como Administrador...",
             "Elevação de Privilégios",
@@ -29,44 +77,71 @@ function Ensure-Admin {
             [System.Windows.Forms.MessageBoxIcon]::Information
         )
 
-        Start-Process -FilePath "pwsh.exe" -Verb RunAs -ArgumentList @(
+        $psPath = Get-PowerShellPath
+        $scriptPath = if ($script:IsCompiledExe) { $PSCommandPath } else { $PSCommandPath }
+
+        Start-Process -FilePath $psPath -Verb RunAs -ArgumentList @(
             "-NoProfile",
             "-ExecutionPolicy", "Bypass",
             "-NoExit",
-            "-File", "`"$PSCommandPath`""
+            "-File", "`"$scriptPath`""
         )
         exit
     }
 }
 
 function Get-WingetPath {
-    $cmd = Get-Command winget -ErrorAction Stop
-    return $cmd.Source
+    try {
+        $cmd = Get-Command winget -ErrorAction Stop
+        return $cmd.Source
+    }
+    catch {
+        throw "winget não encontrado. Certifique-se de que o Windows Package Manager está instalado."
+    }
 }
 
 function Get-PackagesToUpgrade {
-    param([string]$WingetExe)
+    param(
+        [string]$WingetExe,
+        [int]$TimeoutSeconds = 60
+    )
     
     $packages = @()
     
     try {
         # Tentar primeiro com formato JSON (mais confiável)
         try {
-            $jsonOutput = & $WingetExe upgrade --all --include-unknown --include-pinned --output json 2>&1 | Out-String
-            $jsonData = $jsonOutput | ConvertFrom-Json -ErrorAction Stop
+            $job = Start-Job -ScriptBlock {
+                param($exe)
+                & $exe upgrade --all --include-unknown --include-pinned --output json 2>&1 | Out-String
+            } -ArgumentList $WingetExe
             
-            if ($jsonData -and $jsonData.Sources) {
-                foreach ($source in $jsonData.Sources) {
-                    if ($source.Upgrades) {
-                        foreach ($upgrade in $source.Upgrades) {
-                            $packageId = $upgrade.Id
-                            $packageName = if ($upgrade.Name) { $upgrade.Name } else { $packageId }
-                            
-                            if ($packageId -and $packageId -notmatch "^-+$") {
-                                $packages += @{
-                                    Id = $packageId
-                                    Name = $packageName
-                                    Status = "Aguardando"
+            $jsonOutput = $null
+            if (Wait-Job -Job $job -Timeout $TimeoutSeconds) {
+                $jsonOutput = Receive-Job -Job $job
+            }
+            else {
+                Stop-Job -Job $job
+                throw "Timeout ao obter lista de pacotes"
+            }
+            Remove-Job -Job $job
+            
+            if ($jsonOutput) {
+                $jsonData = $jsonOutput | ConvertFrom-Json -ErrorAction Stop
+                
+                if ($jsonData -and $jsonData.Sources) {
+                    foreach ($source in $jsonData.Sources) {
+                        if ($source.Upgrades) {
+                            foreach ($upgrade in $source.Upgrades) {
+                                $packageId = $upgrade.Id
+                                $packageName = if ($upgrade.Name) { $upgrade.Name } else { $packageId }
+                                
+                                if ($packageId -and $packageId -notmatch "^-+$") {
+                                    $packages += @{
+                                        Id = $packageId
+                                        Name = $packageName
+                                        Status = "Aguardando"
+                                    }
                                 }
                             }
                         }
@@ -76,58 +151,77 @@ function Get-PackagesToUpgrade {
         }
         catch {
             # Se JSON falhar, tentar parsear output de texto
-            $output = & $WingetExe upgrade --all --include-unknown --include-pinned 2>&1 | Out-String
-            
-            # Parsear output do winget para extrair pacotes
-            $lines = $output -split "`n"
-            $inTable = $false
-            $headerFound = $false
-            
-            foreach ($line in $lines) {
-                # Detectar início da tabela
-                if ($line -match "Nome\s+Id\s+Versão" -or $line -match "Name\s+Id\s+Version") {
-                    $headerFound = $true
-                    continue
-                }
+            try {
+                $job = Start-Job -ScriptBlock {
+                    param($exe)
+                    & $exe upgrade --all --include-unknown --include-pinned 2>&1 | Out-String
+                } -ArgumentList $WingetExe
                 
-                if ($line -match "^-+$" -and $headerFound) {
-                    $inTable = $true
-                    continue
+                $output = $null
+                if (Wait-Job -Job $job -Timeout $TimeoutSeconds) {
+                    $output = Receive-Job -Job $job
                 }
+                else {
+                    Stop-Job -Job $job
+                    throw "Timeout ao obter lista de pacotes"
+                }
+                Remove-Job -Job $job
                 
-                if ($inTable -and $line.Trim() -ne "" -and $line -notmatch "^-+$") {
-                    # Formato típico: Nome    Id    Versão    Disponível    Fonte
-                    # Usar regex para capturar melhor
-                    if ($line -match "(\S+)\s+([A-Za-z0-9\.\-]+\.[A-Za-z0-9\.\-]+)\s+") {
-                        $packageName = $matches[1].Trim()
-                        $packageId = $matches[2].Trim()
-                        
-                        if ($packageId -and $packageId -ne "Id" -and $packageId -notmatch "^-+$") {
-                            $packages += @{
-                                Id = $packageId
-                                Name = $packageName
-                                Status = "Aguardando"
-                            }
+                if ($output) {
+                    # Parsear output do winget para extrair pacotes
+                    $lines = $output -split "`n"
+                    $inTable = $false
+                    $headerFound = $false
+                    
+                    foreach ($line in $lines) {
+                        # Detectar início da tabela
+                        if ($line -match "Nome\s+Id\s+Versão" -or $line -match "Name\s+Id\s+Version") {
+                            $headerFound = $true
+                            continue
                         }
-                    }
-                    else {
-                        # Fallback: dividir por espaços múltiplos
-                        $parts = $line -split "\s{2,}" | Where-Object { $_.Trim() -ne "" }
                         
-                        if ($parts.Count -ge 2) {
-                            $packageName = $parts[0].Trim()
-                            $packageId = $parts[1].Trim()
-                            
-                            if ($packageId -and $packageId -ne "Id" -and $packageId -notmatch "^-+$" -and $packageId -match "\.") {
-                                $packages += @{
-                                    Id = $packageId
-                                    Name = $packageName
-                                    Status = "Aguardando"
+                        if ($line -match "^-+$" -and $headerFound) {
+                            $inTable = $true
+                            continue
+                        }
+                        
+                        if ($inTable -and $line.Trim() -ne "" -and $line -notmatch "^-+$") {
+                            # Formato típico: Nome    Id    Versão    Disponível    Fonte
+                            if ($line -match "(\S+)\s+([A-Za-z0-9\.\-]+\.[A-Za-z0-9\.\-]+)\s+") {
+                                $packageName = $matches[1].Trim()
+                                $packageId = $matches[2].Trim()
+                                
+                                if ($packageId -and $packageId -ne "Id" -and $packageId -notmatch "^-+$") {
+                                    $packages += @{
+                                        Id = $packageId
+                                        Name = $packageName
+                                        Status = "Aguardando"
+                                    }
+                                }
+                            }
+                            else {
+                                # Fallback: dividir por espaços múltiplos
+                                $parts = $line -split "\s{2,}" | Where-Object { $_.Trim() -ne "" }
+                                
+                                if ($parts.Count -ge 2) {
+                                    $packageName = $parts[0].Trim()
+                                    $packageId = $parts[1].Trim()
+                                    
+                                    if ($packageId -and $packageId -ne "Id" -and $packageId -notmatch "^-+$" -and $packageId -match "\.") {
+                                        $packages += @{
+                                            Id = $packageId
+                                            Name = $packageName
+                                            Status = "Aguardando"
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
+            catch {
+                # Se tudo falhar, retornar lista vazia
             }
         }
     }
@@ -148,46 +242,73 @@ function Update-Package {
         [System.Windows.Forms.Label]$PercentLabel,
         [hashtable]$Package,
         [int]$CurrentIndex,
-        [int]$TotalPackages
+        [int]$TotalPackages,
+        [int]$TimeoutSeconds = 300
     )
     
-    # Atualizar status na lista
-    $packageIndex = $PackageList.Items.IndexOf("⏳ $($Package.Name) - Aguardando")
-    if ($packageIndex -ge 0) {
-        $PackageList.Items[$packageIndex] = "→ $($Package.Name) - Atualizando..."
-        $Package.Status = "Atualizando"
-    }
-    
-    # Atualizar label de status
-    $StatusLabel.Text = "Atualizando: $($Package.Name)... ($CurrentIndex de $TotalPackages)"
-    
-    # Atualizar barra de progresso e percentual
-    $progressPercent = [int](($CurrentIndex / $TotalPackages) * 100)
-    $ProgressBar.Value = $progressPercent
-    $PercentLabel.Text = "$progressPercent%"
-    
-    # Processar eventos da UI
-    [System.Windows.Forms.Application]::DoEvents()
-    
-    # Executar atualização
-    $process = Start-Process -FilePath $WingetExe -ArgumentList $WingetArgs -NoNewWindow -PassThru -Wait
-    
-    # Atualizar status baseado no resultado
-    if ($process.ExitCode -eq 0) {
+    try {
+        # Atualizar status na lista
+        $packageIndex = $PackageList.Items.IndexOf("⏳ $($Package.Name) - Aguardando")
         if ($packageIndex -ge 0) {
-            $PackageList.Items[$packageIndex] = "✓ $($Package.Name) - Concluído"
-            $Package.Status = "Concluído"
+            $PackageList.Items[$packageIndex] = "→ $($Package.Name) - Atualizando..."
+            $Package.Status = "Atualizando"
+        }
+        
+        # Atualizar label de status
+        $StatusLabel.Text = "Atualizando: $($Package.Name)... ($CurrentIndex de $TotalPackages)"
+        
+        # Atualizar barra de progresso e percentual
+        $progressPercent = [int](($CurrentIndex / $TotalPackages) * 100)
+        $ProgressBar.Value = $progressPercent
+        $PercentLabel.Text = "$progressPercent%"
+        
+        # Processar eventos da UI
+        [System.Windows.Forms.Application]::DoEvents()
+        
+        # Executar atualização com timeout
+        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processInfo.FileName = $WingetExe
+        $processInfo.Arguments = ($WingetArgs -join " ")
+        $processInfo.UseShellExecute = $false
+        $processInfo.CreateNoWindow = $true
+        $processInfo.RedirectStandardOutput = $true
+        $processInfo.RedirectStandardError = $true
+        
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+        
+        $process.Start() | Out-Null
+        $finished = $process.WaitForExit($TimeoutSeconds * 1000)
+        
+        if (-not $finished) {
+            $process.Kill()
+            throw "Timeout ao atualizar pacote"
+        }
+        
+        # Atualizar status baseado no resultado
+        if ($process.ExitCode -eq 0) {
+            if ($packageIndex -ge 0) {
+                $PackageList.Items[$packageIndex] = "✓ $($Package.Name) - Concluído"
+                $Package.Status = "Concluído"
+            }
+        }
+        else {
+            if ($packageIndex -ge 0) {
+                $PackageList.Items[$packageIndex] = "✗ $($Package.Name) - Erro (ExitCode: $($process.ExitCode))"
+                $Package.Status = "Erro"
+            }
         }
     }
-    else {
+    catch {
         if ($packageIndex -ge 0) {
-            $PackageList.Items[$packageIndex] = "✗ $($Package.Name) - Erro (ExitCode: $($process.ExitCode))"
+            $PackageList.Items[$packageIndex] = "✗ $($Package.Name) - Erro: $($_.Exception.Message)"
             $Package.Status = "Erro"
         }
     }
-    
-    # Processar eventos da UI novamente
-    [System.Windows.Forms.Application]::DoEvents()
+    finally {
+        # Processar eventos da UI novamente
+        [System.Windows.Forms.Application]::DoEvents()
+    }
 }
 
 function Show-UpdaterGUI {
@@ -262,78 +383,130 @@ function Show-UpdaterGUI {
         "--include-pinned"
     )
     
-    # Executar atualizações quando o formulário for exibido
-    $form.Add_Shown({
-        $form.Activate()
-        
+    # Variáveis de estado
+    $script:packages = @()
+    $script:currentPackageIndex = 0
+    $script:isProcessing = $false
+    $script:hasError = $false
+    
+    # Timer para executar operações de forma assíncrona
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 100
+    $timerStep = 0
+    
+    $timer.Add_Tick({
         try {
-            # Obter lista de pacotes
-            $statusLabel.Text = "Obtendo lista de pacotes..."
-            [System.Windows.Forms.Application]::DoEvents()
-            
-            $packages = Get-PackagesToUpgrade -WingetExe $WingetExe
-            
-            # Adicionar Zotero explicitamente se não estiver na lista
-            $zoteroFound = $false
-            foreach ($pkg in $packages) {
-                if ($pkg.Id -eq "DigitalScholar.Zotero") {
-                    $zoteroFound = $true
-                    break
+            switch ($timerStep) {
+                0 {
+                    # Passo 0: Obter lista de pacotes
+                    $statusLabel.Text = "Obtendo lista de pacotes..."
+                    [System.Windows.Forms.Application]::DoEvents()
+                    
+                    try {
+                        $script:packages = Get-PackagesToUpgrade -WingetExe $WingetExe -TimeoutSeconds 60
+                        
+                        # Adicionar Zotero explicitamente se não estiver na lista
+                        $zoteroFound = $false
+                        foreach ($pkg in $script:packages) {
+                            if ($pkg.Id -eq "DigitalScholar.Zotero") {
+                                $zoteroFound = $true
+                                break
+                            }
+                        }
+                        
+                        if (-not $zoteroFound) {
+                            $script:packages += @{
+                                Id = "DigitalScholar.Zotero"
+                                Name = "Zotero"
+                                Status = "Aguardando"
+                            }
+                        }
+                        
+                        # Adicionar pacotes à lista
+                        foreach ($pkg in $script:packages) {
+                            $packageList.Items.Add("⏳ $($pkg.Name) - Aguardando")
+                        }
+                        [System.Windows.Forms.Application]::DoEvents()
+                        
+                        if ($script:packages.Count -eq 0) {
+                            $statusLabel.Text = "Nenhum pacote encontrado para atualizar."
+                            $progressBar.Value = 100
+                            $percentLabel.Text = "100%"
+                            $closeButton.Enabled = $true
+                            $timer.Stop()
+                            return
+                        }
+                        
+                        $timerStep = 1
+                        $script:currentPackageIndex = 0
+                        $script:isProcessing = $true
+                    }
+                    catch {
+                        $statusLabel.Text = "ERRO ao obter lista: $($_.Exception.Message)"
+                        $statusLabel.ForeColor = [System.Drawing.Color]::Red
+                        $closeButton.Enabled = $true
+                        $script:hasError = $true
+                        $timer.Stop()
+                    }
+                }
+                
+                1 {
+                    # Passo 1: Processar cada pacote
+                    if ($script:currentPackageIndex -lt $script:packages.Count) {
+                        $pkg = $script:packages[$script:currentPackageIndex]
+                        $current = $script:currentPackageIndex + 1
+                        $total = $script:packages.Count
+                        
+                        $wingetArgs = @("upgrade", "--id", $pkg.Id) + $common
+                        
+                        Update-Package -WingetExe $WingetExe `
+                            -WingetArgs $wingetArgs `
+                            -ProgressBar $progressBar `
+                            -PackageList $packageList `
+                            -StatusLabel $statusLabel `
+                            -PercentLabel $percentLabel `
+                            -Package $pkg `
+                            -CurrentIndex $current `
+                            -TotalPackages $total `
+                            -TimeoutSeconds 300
+                        
+                        $script:currentPackageIndex++
+                        [System.Windows.Forms.Application]::DoEvents()
+                    }
+                    else {
+                        # Concluído
+                        $statusLabel.Text = "Concluído! Todos os pacotes foram processados."
+                        $progressBar.Value = 100
+                        $percentLabel.Text = "100%"
+                        $closeButton.Enabled = $true
+                        $script:isProcessing = $false
+                        $timer.Stop()
+                    }
                 }
             }
-            
-            if (-not $zoteroFound) {
-                $packages += @{
-                    Id = "DigitalScholar.Zotero"
-                    Name = "Zotero"
-                    Status = "Aguardando"
-                }
-            }
-            
-            # Adicionar pacotes à lista
-            foreach ($pkg in $packages) {
-                $packageList.Items.Add("⏳ $($pkg.Name) - Aguardando")
-            }
-            [System.Windows.Forms.Application]::DoEvents()
-            
-            if ($packages.Count -eq 0) {
-                $statusLabel.Text = "Nenhum pacote encontrado para atualizar."
-                $progressBar.Value = 100
-                $percentLabel.Text = "100%"
-                $closeButton.Enabled = $true
-                return
-            }
-            
-            # Atualizar cada pacote
-            $total = $packages.Count
-            for ($i = 0; $i -lt $total; $i++) {
-                $pkg = $packages[$i]
-                $current = $i + 1
-                
-                $wingetArgs = @("upgrade", "--id", $pkg.Id) + $common
-                
-                Update-Package -WingetExe $WingetExe `
-                    -WingetArgs $wingetArgs `
-                    -ProgressBar $progressBar `
-                    -PackageList $packageList `
-                    -StatusLabel $statusLabel `
-                    -PercentLabel $percentLabel `
-                    -Package $pkg `
-                    -CurrentIndex $current `
-                    -TotalPackages $total
-            }
-            
-            # Concluído
-            $statusLabel.Text = "Concluído! Todos os pacotes foram processados."
-            $progressBar.Value = 100
-            $percentLabel.Text = "100%"
-            $closeButton.Enabled = $true
         }
         catch {
             $statusLabel.Text = "ERRO: $($_.Exception.Message)"
             $statusLabel.ForeColor = [System.Drawing.Color]::Red
             $closeButton.Enabled = $true
+            $script:hasError = $true
+            $script:isProcessing = $false
+            $timer.Stop()
         }
+    })
+    
+    # Iniciar processamento quando o formulário for exibido
+    $form.Add_Shown({
+        $form.Activate()
+        $timer.Start()
+    })
+    
+    # Parar timer quando fechar
+    $form.Add_FormClosing({
+        if ($timer.Enabled) {
+            $timer.Stop()
+        }
+        $timer.Dispose()
     })
     
     # Mostrar formulário

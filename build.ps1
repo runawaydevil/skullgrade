@@ -62,97 +62,232 @@ if (Test-Path $outputFile) {
 Write-Host "Compilando $scriptFile em $outputFile..." -ForegroundColor Cyan
 Write-Host ""
 
-try {
-    # Converter PowerShell para EXE usando PS2EXE
-    # PS2EXE usa parâmetros posicionais ou nomeados dependendo da versão
-    # Vamos usar a sintaxe mais comum
-    
-    Write-Host "Parâmetros de compilação:" -ForegroundColor Gray
-    Write-Host "  - Modo: GUI (sem console)" -ForegroundColor Gray
-    Write-Host "  - Requer Admin: Sim (UAC)" -ForegroundColor Gray
-    Write-Host "  - Manifesto: $manifestFile" -ForegroundColor Gray
-    Write-Host ""
-    
-    # Verificar versão do PS2EXE para usar sintaxe correta
-    $ps2exeVersion = (Get-Module ps2exe).Version
-    
-    # Tentar usar Invoke-ps2exe (versões mais recentes)
-    try {
-        Invoke-ps2exe -inputFile $scriptFile `
-            -outputFile $outputFile `
-            -noConsole `
-            -requireAdmin `
-            -title "Atualizador de Pacotes Winget v0.01" `
-            -description "Atualizador de Pacotes Winget - Desenvolvido por Pablo Murad (pablomurad@pm.me) - 2026" `
-            -company "Pablo Murad" `
-            -product "Atualizador Winget" `
-            -copyright "Copyright (C) 2026 Pablo Murad" `
-            -version "0.0.0.1"
+# Obter informações do módulo
+$module = Get-Module ps2exe
+$moduleBase = if ($module -is [Array]) { $module[0].ModuleBase } else { $module.ModuleBase }
+
+Write-Host "Módulo PS2EXE encontrado em: $moduleBase" -ForegroundColor Gray
+Write-Host ""
+
+# Tentar diferentes métodos em ordem
+$compilationSuccess = $false
+$methods = @()
+
+# Método 1: Win-PS2EXE.exe (executável direto)
+$winPs2exeExe = Join-Path $moduleBase "Win-PS2EXE.exe"
+if (Test-Path $winPs2exeExe) {
+    $methods += @{
+        Name = "Win-PS2EXE.exe"
+        Command = $winPs2exeExe
+        Type = "Executable"
     }
-    catch {
-        # Se Invoke-ps2exe não funcionar, tentar ps2exe.ps1 diretamente
-        Write-Host "Tentando método alternativo..." -ForegroundColor Yellow
+}
+
+# Método 2: Win-PS2EXE (comando do módulo)
+$methods += @{
+    Name = "Win-PS2EXE"
+    Command = "Win-PS2EXE"
+    Type = "Cmdlet"
+}
+
+# Método 3: ps2exe.ps1 (script direto)
+$ps2exeScript = Join-Path $moduleBase "ps2exe.ps1"
+if (Test-Path $ps2exeScript) {
+    $methods += @{
+        Name = "ps2exe.ps1"
+        Command = $ps2exeScript
+        Type = "Script"
+    }
+}
+
+# Tentar cada método
+foreach ($method in $methods) {
+    if ($compilationSuccess) { break }
+    
+    Write-Host "Tentando método: $($method.Name)..." -ForegroundColor Cyan
+    
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = @()
+        $errors = @()
         
-        $ps2exeScript = Join-Path (Get-Module ps2exe).ModuleBase "ps2exe.ps1"
+        # Preparar metadados completos para tornar o executável mais seguro
+        $metadata = @{
+            inputFile = $scriptFile
+            outputFile = $outputFile
+            noConsole = $true
+            requireAdmin = $true
+            title = "Atualizador de Pacotes Winget"
+            description = "Aplicativo gráfico para atualização automática de pacotes instalados via Windows Package Manager (winget). Desenvolvido por Pablo Murad."
+            company = "Pablo Murad"
+            product = "Atualizador de Pacotes Winget"
+            copyright = "Copyright (C) 2026 Pablo Murad. Todos os direitos reservados."
+            version = "0.0.0.1"
+            fileVersion = "0.0.0.1"
+            productVersion = "0.0.0.1"
+        }
         
-        if (Test-Path $ps2exeScript) {
-            & $ps2exeScript -inputFile $scriptFile `
-                -outputFile $outputFile `
+        # Executar com metadados completos
+        if ($method.Type -eq "Executable") {
+            # Executável direto
+            $args = "-inputFile `"$($metadata.inputFile)`" -outputFile `"$($metadata.outputFile)`" -noConsole -requireAdmin -title `"$($metadata.title)`" -description `"$($metadata.description)`" -company `"$($metadata.company)`" -product `"$($metadata.product)`" -copyright `"$($metadata.copyright)`" -version `"$($metadata.version)`""
+            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $processInfo.FileName = $method.Command
+            $processInfo.Arguments = $args
+            $processInfo.UseShellExecute = $false
+            $processInfo.CreateNoWindow = $true
+            $processInfo.RedirectStandardOutput = $true
+            $processInfo.RedirectStandardError = $true
+            
+            $process = New-Object System.Diagnostics.Process
+            $process.StartInfo = $processInfo
+            $process.Start() | Out-Null
+            
+            $output = $process.StandardOutput.ReadToEnd()
+            $errors = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            $exitCode = $process.ExitCode
+        }
+        elseif ($method.Type -eq "Cmdlet") {
+            # Comando do módulo com metadados completos
+            $output = & $method.Command `
+                -inputFile $metadata.inputFile `
+                -outputFile $metadata.outputFile `
                 -noConsole `
                 -requireAdmin `
-                -title "Atualizador de Pacotes Winget v0.01" `
-                -description "Atualizador de Pacotes Winget - Desenvolvido por Pablo Murad (pablomurad@pm.me) - 2026" `
-                -company "Pablo Murad" `
-                -product "Atualizador Winget" `
-                -copyright "Copyright (C) 2026 Pablo Murad" `
-                -version "0.0.0.1"
+                -title $metadata.title `
+                -description $metadata.description `
+                -company $metadata.company `
+                -product $metadata.product `
+                -copyright $metadata.copyright `
+                -version $metadata.version `
+                2>&1
+            $exitCode = $LASTEXITCODE
         }
         else {
-            throw "Não foi possível encontrar ps2exe.ps1 no módulo PS2EXE"
+            # Script PowerShell com metadados completos
+            $output = & $method.Command `
+                -inputFile $metadata.inputFile `
+                -outputFile $metadata.outputFile `
+                -noConsole `
+                -requireAdmin `
+                -title $metadata.title `
+                -description $metadata.description `
+                -company $metadata.company `
+                -product $metadata.product `
+                -copyright $metadata.copyright `
+                -version $metadata.version `
+                2>&1
+            $exitCode = $LASTEXITCODE
+        }
+        
+        # Mostrar saída
+        if ($output) {
+            foreach ($line in $output) {
+                if ($line -is [System.Management.Automation.ErrorRecord]) {
+                    Write-Host $line.ToString() -ForegroundColor Red
+                } else {
+                    Write-Host $line -ForegroundColor Gray
+                }
+            }
+        }
+        
+        if ($errors) {
+            Write-Host $errors -ForegroundColor Red
+        }
+        
+        if ($exitCode -ne 0 -and $exitCode -ne $null) {
+            Write-Host "Exit code: $exitCode" -ForegroundColor Yellow
+        }
+        
+        # Aguardar e verificar se arquivo foi criado
+        Start-Sleep -Milliseconds 1500
+        
+        if (Test-Path $outputFile) {
+            $compilationSuccess = $true
+            Write-Host ""
+            Write-Host "✓ Compilação concluída com sucesso usando $($method.Name)!" -ForegroundColor Green
+            break
+        } else {
+            Write-Host "Método $($method.Name) não gerou o arquivo." -ForegroundColor Yellow
         }
     }
+    catch {
+        Write-Host "Erro ao executar $($method.Name): $_" -ForegroundColor Red
+        if ($_.Exception.InnerException) {
+            Write-Host "Erro interno: $($_.Exception.InnerException.Message)" -ForegroundColor Red
+        }
+    }
+    finally {
+        $ErrorActionPreference = "Stop"
+    }
     
-    if (Test-Path $outputFile) {
-        Write-Host ""
-        Write-Host "✓ Compilação concluída com sucesso!" -ForegroundColor Green
-        Write-Host ""
+    Write-Host ""
+}
+
+    if ($compilationSuccess) {
         Write-Host "Arquivo gerado: $outputFile" -ForegroundColor Cyan
-        Write-Host "Tamanho: $((Get-Item $outputFile).Length / 1KB) KB" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "Nota: O executável solicitará UAC uma única vez ao iniciar." -ForegroundColor Yellow
+        $fileSize = (Get-Item $outputFile).Length / 1KB
+        Write-Host "Tamanho: $([math]::Round($fileSize, 2)) KB" -ForegroundColor Gray
         Write-Host ""
         
-        # Tentar embutir manifesto manualmente se mt.exe estiver disponível
-        $mtPath = Get-Command mt.exe -ErrorAction SilentlyContinue
-        if ($mtPath) {
-            Write-Host "Embutindo manifesto UAC usando mt.exe..." -ForegroundColor Cyan
-            try {
-                & mt.exe -manifest $manifestFile -outputresource:"$outputFile;1"
+        # Calcular hash SHA256 para verificação
+        Write-Host "Calculando hash SHA256 para verificação..." -ForegroundColor Cyan
+        try {
+            $hash = Get-FileHash -Path $outputFile -Algorithm SHA256
+            Write-Host "Hash SHA256: $($hash.Hash)" -ForegroundColor Green
+            Write-Host ""
+            
+            # Salvar hash em arquivo
+            $hashFile = "$outputFile.sha256"
+            $hash.Hash | Out-File -FilePath $hashFile -Encoding ASCII -NoNewline
+            Write-Host "Hash salvo em: $hashFile" -ForegroundColor Gray
+            Write-Host ""
+        }
+        catch {
+            Write-Host "Aviso: Não foi possível calcular hash SHA256" -ForegroundColor Yellow
+        }
+        
+        Write-Host "Nota: O executável solicitará UAC uma única vez ao iniciar." -ForegroundColor Yellow
+        Write-Host ""
+    
+    # Tentar embutir manifesto manualmente se mt.exe estiver disponível
+    $mtPath = Get-Command mt.exe -ErrorAction SilentlyContinue
+    if ($mtPath) {
+        Write-Host "Embutindo manifesto UAC usando mt.exe..." -ForegroundColor Cyan
+        try {
+            $mtProcess = Start-Process -FilePath "mt.exe" -ArgumentList "-manifest", $manifestFile, "-outputresource:`"$outputFile;1`"" -NoNewWindow -Wait -PassThru
+            if ($mtProcess.ExitCode -eq 0) {
                 Write-Host "✓ Manifesto embutido com sucesso!" -ForegroundColor Green
-            }
-            catch {
-                Write-Host "Aviso: Não foi possível embutir manifesto automaticamente." -ForegroundColor Yellow
+            } else {
+                Write-Host "Aviso: Não foi possível embutir manifesto (mt.exe exit code: $($mtProcess.ExitCode))" -ForegroundColor Yellow
                 Write-Host "O executável ainda solicitará UAC via -requireAdmin do PS2EXE." -ForegroundColor Gray
             }
         }
-        else {
-            Write-Host "Nota: mt.exe não encontrado. O manifesto será aplicado via -requireAdmin." -ForegroundColor Yellow
-            Write-Host "Para embutir manualmente (opcional), instale Windows SDK e execute:" -ForegroundColor Gray
-            Write-Host "  mt.exe -manifest app.manifest -outputresource:$outputFile;1" -ForegroundColor Gray
+        catch {
+            Write-Host "Aviso: Não foi possível embutir manifesto automaticamente." -ForegroundColor Yellow
+            Write-Host "O executável ainda solicitará UAC via -requireAdmin do PS2EXE." -ForegroundColor Gray
         }
-        Write-Host ""
     }
     else {
-        Write-Host ""
-        Write-Host "ERRO: Arquivo $outputFile não foi gerado!" -ForegroundColor Red
-        exit 1
+        Write-Host "Nota: mt.exe não encontrado. O manifesto será aplicado via -requireAdmin." -ForegroundColor Yellow
+        Write-Host "Para embutir manualmente (opcional), instale Windows SDK e execute:" -ForegroundColor Gray
+        Write-Host "  mt.exe -manifest app.manifest -outputresource:$outputFile;1" -ForegroundColor Gray
     }
-}
-catch {
     Write-Host ""
-    Write-Host "ERRO durante compilação: $_" -ForegroundColor Red
-    Write-Host $_.ScriptStackTrace -ForegroundColor Gray
+    Write-Host "Build concluído!" -ForegroundColor Green
+}
+else {
+    Write-Host "ERRO: Todos os métodos de compilação falharam!" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Métodos tentados:" -ForegroundColor Yellow
+    foreach ($method in $methods) {
+        Write-Host "  - $($method.Name)" -ForegroundColor Gray
+    }
+    Write-Host ""
+    Write-Host "Sugestões:" -ForegroundColor Yellow
+    Write-Host "  1. Verifique se o PowerShell 7+ está instalado" -ForegroundColor Gray
+    Write-Host "  2. Tente executar manualmente: Win-PS2EXE -inputFile atualizador.ps1 -outputFile atualizador.exe -noConsole -requireAdmin" -ForegroundColor Gray
+    Write-Host "  3. Verifique os logs de erro acima" -ForegroundColor Gray
     exit 1
 }
-
-Write-Host "Build concluído!" -ForegroundColor Green

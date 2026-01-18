@@ -1,5 +1,9 @@
 # Atualizador de Pacotes Winget
 
+<div align="center">
+  <img src="images/atualizador.png" alt="Logo" width="64" height="64">
+</div>
+
 **Versão:** 0.01  
 **Desenvolvido por:** Pablo Murad  
 **Contato:** pablomurad@pm.me  
@@ -145,6 +149,49 @@ O aplicativo sempre tenta atualizar o **Zotero** explicitamente, mesmo que não 
 - Verifique se o PowerShell 7+ está instalado
 - Certifique-se de que está executando em Windows (não Linux/Mac)
 - Verifique os logs de erro no console (se executar o .ps1 diretamente)
+
+### Antivírus bloqueando o executável
+
+**Este é um falso positivo comum** com executáveis compilados a partir de scripts PowerShell. O aplicativo é seguro e não contém malware.
+
+#### Por que isso acontece?
+
+- Executáveis gerados por PS2EXE podem ser detectados como suspeitos por alguns antivírus
+- Isso ocorre porque o código PowerShell é empacotado dentro do executável
+- É um problema conhecido com ferramentas de compilação de scripts
+
+#### Soluções:
+
+1. **Adicionar exceção no antivírus:**
+   - Adicione o arquivo `atualizador.exe` à lista de exceções do seu antivírus
+   - Ou adicione a pasta onde o executável está localizado
+
+2. **Verificar integridade:**
+   - Após compilar, o script gera um arquivo `atualizador.exe.sha256` com o hash SHA256
+   - Você pode verificar a integridade do arquivo executando:
+     ```powershell
+     Get-FileHash -Path atualizador.exe -Algorithm SHA256
+     ```
+   - Compare com o hash no arquivo `.sha256`
+
+3. **Executar o script diretamente:**
+   - Se preferir, você pode executar o script PowerShell diretamente:
+     ```powershell
+     pwsh -NoProfile -ExecutionPolicy Bypass -File .\atualizador.ps1
+     ```
+
+4. **Reportar falso positivo:**
+   - Se o seu antivírus continuar bloqueando, considere reportar como falso positivo
+   - Isso ajuda a melhorar a detecção do antivírus
+
+#### Metadados do Executável
+
+O executável inclui metadados completos para identificação:
+- **Produto:** Atualizador de Pacotes Winget
+- **Empresa:** Pablo Murad
+- **Versão:** 0.0.0.1
+- **Copyright:** Copyright (C) 2026 Pablo Murad
+- **Descrição:** Aplicativo gráfico para atualização automática de pacotes instalados via Windows Package Manager (winget)
 
 ## Desenvolvimento
 

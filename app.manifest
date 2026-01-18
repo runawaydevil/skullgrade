@@ -6,7 +6,7 @@
     name="AtualizadorWinget"
     type="win32"
   />
-  <description>Atualizador de Pacotes Winget v0.01 - Desenvolvido por Pablo Murad</description>
+  <description>Aplicativo gráfico para atualização automática de pacotes instalados via Windows Package Manager (winget). Desenvolvido por Pablo Murad (pablomurad@pm.me) - 2026. Versão 0.01.</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
@@ -21,4 +21,10 @@
       <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
     </application>
   </compatibility>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
 </assembly>
