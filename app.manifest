@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
-    version="0.0.0.1"
+    version="0.0.0.2"
     processorArchitecture="*"
     name="AtualizadorWinget"
     type="win32"
   />
-  <description>Aplicativo gráfico para atualização automática de pacotes instalados via Windows Package Manager (winget). Desenvolvido por Pablo Murad (pablomurad@pm.me) - 2026. Versão 0.01.</description>
+  <description>Aplicativo gráfico moderno para atualização automática de pacotes instalados via Windows Package Manager (winget). Desenvolvido por Pablo Murad (pablomurad@pm.me) - 2026. Versão 0.02.</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

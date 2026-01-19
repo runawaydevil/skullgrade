@@ -1,5 +1,5 @@
 # build.ps1 - Script para compilar atualizador.ps1 em atualizador.exe
-# Versão: 0.01
+# Versão: 0.02
 # Desenvolvido por: Pablo Murad
 # Contato: pablomurad@pm.me
 # Ano: 2026
@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 Write-Host "=== Build Script - Atualizador Winget ===" -ForegroundColor Cyan
-Write-Host "Versão: 0.01 - Pablo Murad (pablomurad@pm.me) - 2026" -ForegroundColor Cyan
+Write-Host "Versão: 0.02 - Pablo Murad (pablomurad@pm.me) - 2026" -ForegroundColor Cyan
 Write-Host ""
 
 # Verificar se PS2EXE está instalado
@@ -36,6 +36,7 @@ Import-Module ps2exe -Force
 # Verificar se arquivos necessários existem
 $scriptFile = "atualizador.ps1"
 $manifestFile = "app.manifest"
+$iconFile = "images\atualizador.ico"
 $outputFile = "atualizador.exe"
 
 if (-not (Test-Path $scriptFile)) {
@@ -51,6 +52,11 @@ if (-not (Test-Path $manifestFile)) {
 Write-Host "Arquivos encontrados:" -ForegroundColor Green
 Write-Host "  - Script: $scriptFile" -ForegroundColor Gray
 Write-Host "  - Manifesto: $manifestFile" -ForegroundColor Gray
+if (Test-Path $iconFile) {
+    Write-Host "  - Ícone: $iconFile" -ForegroundColor Gray
+} else {
+    Write-Host "  - Ícone: $iconFile (não encontrado, usando padrão)" -ForegroundColor Yellow
+}
 Write-Host ""
 
 # Limpar arquivo anterior se existir
@@ -111,26 +117,34 @@ foreach ($method in $methods) {
         $output = @()
         $errors = @()
         
-        # Preparar metadados completos para tornar o executável mais seguro
+        # Preparar metadados completos para tornar o executável mais seguro e legítimo
         $metadata = @{
             inputFile = $scriptFile
             outputFile = $outputFile
             noConsole = $true
             requireAdmin = $true
             title = "Atualizador de Pacotes Winget"
-            description = "Aplicativo gráfico para atualização automática de pacotes instalados via Windows Package Manager (winget). Desenvolvido por Pablo Murad."
+            description = "Aplicativo gráfico moderno para atualização automática de pacotes instalados via Windows Package Manager (winget). Desenvolvido por Pablo Murad (pablomurad@pm.me)."
             company = "Pablo Murad"
             product = "Atualizador de Pacotes Winget"
             copyright = "Copyright (C) 2026 Pablo Murad. Todos os direitos reservados."
-            version = "0.0.0.1"
-            fileVersion = "0.0.0.1"
-            productVersion = "0.0.0.1"
+            version = "0.0.0.2"
+            fileVersion = "0.0.0.2"
+            productVersion = "0.0.0.2"
+        }
+        
+        # Adicionar ícone se disponível
+        if (Test-Path $iconFile) {
+            $metadata.icon = $iconFile
         }
         
         # Executar com metadados completos
         if ($method.Type -eq "Executable") {
             # Executável direto
             $args = "-inputFile `"$($metadata.inputFile)`" -outputFile `"$($metadata.outputFile)`" -noConsole -requireAdmin -title `"$($metadata.title)`" -description `"$($metadata.description)`" -company `"$($metadata.company)`" -product `"$($metadata.product)`" -copyright `"$($metadata.copyright)`" -version `"$($metadata.version)`""
+            if ($metadata.icon) {
+                $args += " -icon `"$($metadata.icon)`""
+            }
             $processInfo = New-Object System.Diagnostics.ProcessStartInfo
             $processInfo.FileName = $method.Command
             $processInfo.Arguments = $args
@@ -150,34 +164,42 @@ foreach ($method in $methods) {
         }
         elseif ($method.Type -eq "Cmdlet") {
             # Comando do módulo com metadados completos
-            $output = & $method.Command `
-                -inputFile $metadata.inputFile `
-                -outputFile $metadata.outputFile `
-                -noConsole `
-                -requireAdmin `
-                -title $metadata.title `
-                -description $metadata.description `
-                -company $metadata.company `
-                -product $metadata.product `
-                -copyright $metadata.copyright `
-                -version $metadata.version `
-                2>&1
+            $cmdletArgs = @(
+                "-inputFile", $metadata.inputFile,
+                "-outputFile", $metadata.outputFile,
+                "-noConsole",
+                "-requireAdmin",
+                "-title", $metadata.title,
+                "-description", $metadata.description,
+                "-company", $metadata.company,
+                "-product", $metadata.product,
+                "-copyright", $metadata.copyright,
+                "-version", $metadata.version
+            )
+            if ($metadata.icon) {
+                $cmdletArgs += "-icon", $metadata.icon
+            }
+            $output = & $method.Command @cmdletArgs 2>&1
             $exitCode = $LASTEXITCODE
         }
         else {
             # Script PowerShell com metadados completos
-            $output = & $method.Command `
-                -inputFile $metadata.inputFile `
-                -outputFile $metadata.outputFile `
-                -noConsole `
-                -requireAdmin `
-                -title $metadata.title `
-                -description $metadata.description `
-                -company $metadata.company `
-                -product $metadata.product `
-                -copyright $metadata.copyright `
-                -version $metadata.version `
-                2>&1
+            $scriptArgs = @(
+                "-inputFile", $metadata.inputFile,
+                "-outputFile", $metadata.outputFile,
+                "-noConsole",
+                "-requireAdmin",
+                "-title", $metadata.title,
+                "-description", $metadata.description,
+                "-company", $metadata.company,
+                "-product", $metadata.product,
+                "-copyright", $metadata.copyright,
+                "-version", $metadata.version
+            )
+            if ($metadata.icon) {
+                $scriptArgs += "-icon", $metadata.icon
+            }
+            $output = & $method.Command @scriptArgs 2>&1
             $exitCode = $LASTEXITCODE
         }
         
@@ -249,6 +271,40 @@ foreach ($method in $methods) {
         }
         
         Write-Host "Nota: O executável solicitará UAC uma única vez ao iniciar." -ForegroundColor Yellow
+        Write-Host ""
+        
+        # Verificações de segurança e legitimidade
+        Write-Host "=== Verificações de Segurança ===" -ForegroundColor Cyan
+        Write-Host "Verificando metadados do executável..." -ForegroundColor Gray
+        
+        try {
+            $fileInfo = Get-Item $outputFile
+            $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($outputFile)
+            
+            Write-Host "  ✓ Arquivo criado: $($fileInfo.Length) bytes" -ForegroundColor Green
+            Write-Host "  ✓ Produto: $($versionInfo.ProductName)" -ForegroundColor Green
+            Write-Host "  ✓ Empresa: $($versionInfo.CompanyName)" -ForegroundColor Green
+            Write-Host "  ✓ Versão: $($versionInfo.FileVersion)" -ForegroundColor Green
+            Write-Host "  ✓ Descrição: $($versionInfo.FileDescription)" -ForegroundColor Green
+            
+            if ([string]::IsNullOrWhiteSpace($versionInfo.ProductName)) {
+                Write-Host "  ⚠ AVISO: Nome do produto vazio - pode causar detecção de antivírus" -ForegroundColor Yellow
+            }
+            if ([string]::IsNullOrWhiteSpace($versionInfo.CompanyName)) {
+                Write-Host "  ⚠ AVISO: Nome da empresa vazio - pode causar detecção de antivírus" -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Host "  ⚠ Não foi possível verificar metadados: $_" -ForegroundColor Yellow
+        }
+        
+        Write-Host ""
+        Write-Host "=== Recomendações para Reduzir Falsos Positivos ===" -ForegroundColor Cyan
+        Write-Host "1. Assinar digitalmente o executável com certificado de código (Code Signing)" -ForegroundColor Gray
+        Write-Host "2. Testar em VirusTotal antes de distribuir" -ForegroundColor Gray
+        Write-Host "3. Distribuir através de canais confiáveis (site oficial, GitHub Releases)" -ForegroundColor Gray
+        Write-Host "4. Manter metadados completos e atualizados (já implementado)" -ForegroundColor Green
+        Write-Host "5. Evitar ofuscação ou compressão excessiva" -ForegroundColor Gray
         Write-Host ""
     
     # Tentar embutir manifesto manualmente se mt.exe estiver disponível

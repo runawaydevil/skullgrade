@@ -4,25 +4,65 @@
   <img src="images/atualizador.png" alt="Logo" width="64" height="64">
 </div>
 
-**Versão:** 0.01  
+**Versão:** 0.02  
 **Desenvolvido por:** Pablo Murad  
 **Contato:** pablomurad@pm.me  
 **Ano:** 2026
 
 ## Descrição
 
-Aplicativo gráfico para Windows que automatiza a atualização de pacotes instalados via **Windows Package Manager (winget)**. O aplicativo exibe uma interface gráfica moderna com progresso detalhado por pacote e solicita privilégios de administrador apenas uma vez ao iniciar.
+Aplicativo gráfico avançado para Windows que automatiza a atualização de pacotes instalados via **Windows Package Manager (winget)**. O aplicativo oferece uma interface gráfica moderna, totalmente responsiva, com funcionalidades avançadas de gerenciamento, logs detalhados e notificações do sistema.
 
 ## Características
 
-- ✅ Interface gráfica moderna (Windows Forms)
-- ✅ Progresso visual por pacote individual
-- ✅ Barra de progresso com percentual
-- ✅ Lista de pacotes com status em tempo real
+### Interface e Usabilidade
+- ✅ Interface gráfica moderna e totalmente responsiva (janela arrastável e redimensionável)
+- ✅ ListView com colunas detalhadas (Nome, Versão Atual, Versão Nova, Status, Progresso)
+- ✅ Progresso visual individual por pacote
+- ✅ Barra de progresso global com percentual
+- ✅ Cores visuais por status (verde=sucesso, vermelho=erro, azul=atualizando)
+- ✅ Painel de logs expansível/collapsável
+- ✅ Painel de título profissional
+
+### Funcionalidades de Controle
+- ✅ Botão "Atualizar Tudo" para iniciar atualizações
+- ✅ Botão "Pausar/Retomar" para controlar o processo
+- ✅ Botão "Cancelar" para interromper atualizações
+- ✅ Seleção individual de pacotes (checkbox)
+- ✅ Filtros de visualização
+
+### Operações e Performance
+- ✅ Operações assíncronas usando Runspaces (UI nunca trava)
+- ✅ Thread-safe para atualizações seguras da interface
 - ✅ Solicitação de UAC única (via manifesto embutido)
 - ✅ Atualização silenciosa e não-interativa
 - ✅ Suporte a pacotes com pin e versões desconhecidas
-- ✅ Tratamento de erros robusto
+
+### Confiabilidade
+- ✅ Tratamento de erros robusto com retry automático
+- ✅ Retry com backoff exponencial (3 tentativas por padrão)
+- ✅ Timeout configurável por operação
+- ✅ Detecção e tratamento de pacotes problemáticos
+- ✅ Mensagens de erro claras e acionáveis
+
+### Sistema de Logs
+- ✅ Logs detalhados em arquivo (um arquivo por dia)
+- ✅ Visualização de logs na interface
+- ✅ Histórico completo de atualizações (sucesso/falha)
+- ✅ Timestamps em todas as entradas de log
+
+### Configuração
+- ✅ Sistema de configuração via arquivo JSON (`config.json`)
+- ✅ Lista de pacotes excluídos (blacklist)
+- ✅ Timeouts configuráveis
+- ✅ Número de tentativas configurável
+- ✅ Modo silencioso/verboso
+
+### Notificações
+- ✅ Notificações toast do Windows quando atualizações disponíveis
+- ✅ Notificação ao concluir todas atualizações
+- ✅ Alertas de erros críticos
+- ✅ Fallback para balões do sistema se toast não disponível
 
 ## Requisitos
 
@@ -59,23 +99,34 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\atualizador.ps1
 
 1. **Execute o aplicativo** (`atualizador.exe` ou `atualizador.ps1`)
 2. **Aprove o UAC** quando solicitado (apenas na primeira execução)
-3. **Aguarde** enquanto o aplicativo:
-   - Obtém a lista de pacotes disponíveis para atualização
-   - Atualiza cada pacote individualmente
-   - Exibe o progresso em tempo real
-4. **Verifique os resultados** na lista de pacotes:
-   - ✓ = Concluído com sucesso
-   - ✗ = Erro durante atualização
-   - → = Atualizando no momento
+3. **Aguarde** enquanto o aplicativo obtém a lista de pacotes disponíveis para atualização
+4. **Revise a lista** de pacotes encontrados na interface
+5. **Clique em "Atualizar Tudo"** para iniciar o processo de atualização
+6. **Monitore o progresso** em tempo real:
+   - ✓ = Concluído com sucesso (fundo verde)
+   - ✗ = Erro durante atualização (fundo vermelho)
+   - → = Atualizando no momento (fundo azul)
    - ⏳ = Aguardando atualização
+7. **Use os controles**:
+   - **Pausar/Retomar**: Pausa ou retoma o processo de atualização
+   - **Cancelar**: Interrompe todas as atualizações pendentes
+   - **Mostrar Logs**: Expande/oculta o painel de logs detalhados
+8. **Receba notificações** do sistema quando:
+   - Atualizações são encontradas
+   - Todas as atualizações são concluídas
+   - Ocorrem erros críticos
 
 ## Estrutura do Projeto
 
 ```
-Scripts/
-├── atualizador.ps1      # Script principal com interface gráfica
+skullgrade/
+├── atualizador.ps1      # Script principal com interface gráfica moderna
 ├── build.ps1            # Script de compilação para EXE
+├── release.ps1          # Script para preparar releases
 ├── app.manifest         # Manifesto UAC para elevação de privilégios
+├── config.json          # Arquivo de configuração (criado automaticamente)
+├── logs/                # Diretório de logs (criado automaticamente)
+│   └── atualizador_YYYY-MM-DD.log
 ├── instrução.txt        # Instruções de execução (legado)
 └── README.md           # Este arquivo
 ```
@@ -123,6 +174,41 @@ Cada pacote é atualizado individualmente com as seguintes flags:
 ### Pacotes Especiais
 
 O aplicativo sempre tenta atualizar o **Zotero** explicitamente, mesmo que não apareça na lista geral (requer targeting explícito).
+
+## Configuração
+
+O aplicativo cria automaticamente um arquivo `config.json` na primeira execução. Você pode editá-lo para personalizar o comportamento:
+
+```json
+{
+  "ExcludedPackages": [
+    "Publisher.PackageName"
+  ],
+  "TimeoutSeconds": 300,
+  "SilentMode": false,
+  "RetryAttempts": 3,
+  "RetryDelaySeconds": 5,
+  "LogLevel": "Info"
+}
+```
+
+### Opções de Configuração
+
+- **ExcludedPackages**: Lista de IDs de pacotes que devem ser excluídos das atualizações
+- **TimeoutSeconds**: Tempo máximo (em segundos) para cada operação de atualização (padrão: 300)
+- **SilentMode**: Se `true`, reduz a verbosidade dos logs (padrão: `false`)
+- **RetryAttempts**: Número de tentativas em caso de falha (padrão: 3)
+- **RetryDelaySeconds**: Delay base entre tentativas, com backoff exponencial (padrão: 5)
+- **LogLevel**: Nível de log (Info, Warning, Error) - atualmente todos os níveis são registrados
+
+### Logs
+
+Os logs são salvos automaticamente no diretório `logs/` com o formato `atualizador_YYYY-MM-DD.log`. Cada entrada inclui:
+- Timestamp completo
+- Nível de log (Info, Warning, Error)
+- Mensagem detalhada
+
+Os logs também podem ser visualizados na interface do aplicativo através do botão "Mostrar Logs".
 
 ## Solução de Problemas
 
@@ -224,6 +310,23 @@ Para questões, sugestões ou problemas, entre em contato:
 - **Email:** pablomurad@pm.me
 
 ## Changelog
+
+### v0.02 (2026)
+- **MAJOR**: Interface completamente refatorada e modernizada
+- **FIX**: Janela agora é totalmente arrastável e responsiva (corrigido problema de janela estática)
+- **NEW**: Sistema de runspaces para operações assíncronas (UI nunca trava)
+- **NEW**: ListView moderna com colunas detalhadas (Nome, Versão Atual, Versão Nova, Status, Progresso)
+- **NEW**: Controles avançados (Pausar/Retomar, Cancelar, Seleção individual)
+- **NEW**: Sistema de logs detalhado com arquivos diários
+- **NEW**: Visualização de logs na interface (expansível/collapsável)
+- **NEW**: Notificações toast do Windows
+- **NEW**: Sistema de configuração via JSON
+- **NEW**: Retry automático com backoff exponencial
+- **NEW**: Cores visuais por status (verde=sucesso, vermelho=erro, azul=atualizando)
+- **NEW**: Painel de título profissional
+- **IMPROVED**: Parsing melhorado de pacotes (JSON prioritário, fallback robusto)
+- **IMPROVED**: Tratamento de erros mais robusto
+- **IMPROVED**: Thread-safe para todas operações de UI
 
 ### v0.01 (2026)
 - Versão inicial
